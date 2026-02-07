@@ -1,6 +1,18 @@
+# Core pypowerup dependencies
+scipy>=1.7.0
+numpy>=1.20.0
+innerscope>=0.3.0
+
+# Streamlit app dependencies
+streamlit>=1.28.0
+pandas>=1.3.0
+plotly>=5.15.0
+openpyxl>=3.1.0  # For Excel export
+
+# Documentation dependencies (original)
 sphinx-markdown-tables
 nbsphinx
 sphinx-hoverxref
-pygments==2.6.1
+pygments>=2.6.1
 sphinx-rtd-theme
 ipython
