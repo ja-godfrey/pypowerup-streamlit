@@ -55,16 +55,20 @@ st.markdown("""
         padding: 15px;
         margin: 15px 0;
         text-align: center;
+        color: #111111 !important;
     }
     .result-label {
         font-size: 1rem;
-        color: #1e8449;
+        color: #1e8449 !important;
         font-weight: 600;
     }
     .result-value {
         font-size: 2rem;
-        color: #145a32;
+        color: #145a32 !important;
         font-weight: 700;
+    }
+    .result-box div {
+        color: #444444 !important;
     }
     .computed-box {
         background-color: #fdebd0;
@@ -72,6 +76,10 @@ st.markdown("""
         border-radius: 5px;
         padding: 10px;
         margin: 10px 0;
+        color: #111111 !important;
+    }
+    .computed-box p, .computed-box strong, .computed-box code {
+        color: #111111 !important;
     }
     .note-box {
         background-color: #fcf3cf;
@@ -79,6 +87,7 @@ st.markdown("""
         padding: 10px 15px;
         margin: 15px 0;
         font-style: italic;
+        color: #111111 !important;
     }
     .helper-box {
         background-color: #e8f6f3;
@@ -86,6 +95,7 @@ st.markdown("""
         border-radius: 5px;
         padding: 10px;
         margin: 10px 0;
+        color: #111111 !important;
     }
     .stNumberInput > div > div > input {
         background-color: #fffde7 !important;
@@ -714,16 +724,291 @@ def export_to_excel(export_data):
     return output.getvalue()
 
 
+# LaTeX symbols for each parameter
+PARAM_LATEX_SYMBOLS = {
+    "alpha": r"\alpha",
+    "two_tailed": r"t_{\text{tails}}",
+    "power": r"1-\beta",
+    "es": r"\delta",
+    "p": r"P",
+    "n": r"n",
+    "J": r"J",
+    "K": r"K",
+    "L": r"L",
+    "g": r"g^{*}",
+    "r21": r"R^{2}_{1}",
+    "r22": r"R^{2}_{2}",
+    "r23": r"R^{2}_{3}",
+    "r24": r"R^{2}_{4}",
+    "rho2": r"\rho_{2}",
+    "rho3": r"\rho_{3}",
+    "rho4": r"\rho_{4}",
+    "omega2": r"\omega_{2}",
+    "omega3": r"\omega_{3}",
+    "omega4": r"\omega_{4}",
+    "r2t2": r"R^{2}_{T2}",
+    "r2t3": r"R^{2}_{T3}",
+    "r2t4": r"R^{2}_{T4}",
+    "design_effect": r"\mathrm{DE}",
+    "T": r"T",
+    "tf": r"t_{f}",
+    "q": r"q",
+    "rho_ts": r"\rho_{TS}",
+}
+
+# Human-readable parameter descriptions for the academic paragraph
+PARAM_PROSE = {
+    "alpha": ("Type I error rate", "\\alpha = {val}"),
+    "two_tailed": ("test direction", "{val}-tailed test"),
+    "power": ("statistical power", "1{-}\\beta = {val}"),
+    "es": ("effect size", "\\delta = {val}"),
+    "p": ("treatment proportion", "P = {val}"),
+    "n": ("Level-1 cluster size", "n = {val}"),
+    "J": ("Level-2 units", "J = {val}"),
+    "K": ("Level-3 units", "K = {val}"),
+    "L": ("Level-4 units", "L = {val}"),
+    "g": ("covariates", "g^{{*}} = {val}"),
+    "r21": ("Level-1 R²", "R^{{2}}_{{1}} = {val}"),
+    "r22": ("Level-2 R²", "R^{{2}}_{{2}} = {val}"),
+    "r23": ("Level-3 R²", "R^{{2}}_{{3}} = {val}"),
+    "r24": ("Level-4 R²", "R^{{2}}_{{4}} = {val}"),
+    "rho2": ("Level-2 ICC", "\\rho_{{2}} = {val}"),
+    "rho3": ("Level-3 ICC", "\\rho_{{3}} = {val}"),
+    "rho4": ("Level-4 ICC", "\\rho_{{4}} = {val}"),
+    "omega2": ("Level-2 treatment heterogeneity", "\\omega_{{2}} = {val}"),
+    "omega3": ("Level-3 treatment heterogeneity", "\\omega_{{3}} = {val}"),
+    "omega4": ("Level-4 treatment heterogeneity", "\\omega_{{4}} = {val}"),
+    "r2t2": ("Level-2 treatment R²", "R^{{2}}_{{T2}} = {val}"),
+    "r2t3": ("Level-3 treatment R²", "R^{{2}}_{{T3}} = {val}"),
+    "r2t4": ("Level-4 treatment R²", "R^{{2}}_{{T4}} = {val}"),
+    "design_effect": ("design effect", "\\mathrm{{DE}} = {val}"),
+    "T": ("baseline periods", "T = {val}"),
+    "tf": ("follow-up period", "t_f = {val}"),
+    "q": ("comparison ratio", "q = {val}"),
+    "rho_ts": ("treatment-score correlation", "\\rho_{{TS}} = {val}"),
+}
+
+RESULT_LATEX_LABELS = {
+    "MDES": r"\delta_{\min}",
+    "Power": r"1-\beta",
+}
+
+
+def export_to_latex(export_data):
+    """Generate a publication-ready LaTeX table from export data."""
+    meta = export_data["metadata"]
+    result = export_data["result"]
+    params = export_data["parameters"]
+    computed = export_data["computed_values"]
+
+    design_name = meta["design_name"]
+    design_model = meta["design_model"]
+    calc_type = meta["calculation_type"]
+
+    # Determine result label symbol
+    result_type = result["type"]
+    if "MDES" in result_type or "Effect" in result_type:
+        result_sym = r"\hat{\delta}_{\min}"
+        result_full = "Minimum Detectable Effect Size"
+    elif "Sample" in result_type or "Size" in result_type:
+        result_sym = r"\hat{N}_{\min}"
+        result_full = "Minimum Required Sample Size"
+    else:
+        result_sym = r"\hat{\pi}"
+        result_full = "Statistical Power"
+
+    def fmt_val(v):
+        if isinstance(v, float):
+            return f"{v:.4f}".rstrip("0").rstrip(".")
+        return str(v)
+
+    # Build parameter rows
+    param_rows = []
+    for pname, pval in params.items():
+        sym = PARAM_LATEX_SYMBOLS.get(pname, pname)
+        label = PARAMS[pname]["label"] if pname in PARAMS else pname
+        param_rows.append(
+            f"        & ${sym}$ & {label} & {fmt_val(pval)} \\\\"
+        )
+    param_block = "\n".join(param_rows)
+
+    # Build computed rows
+    m_val = fmt_val(computed.get("M (Multiplier)", ""))
+    t1_val = fmt_val(computed.get("T1 (Precision)", ""))
+    t2_val = fmt_val(computed.get("T2 (Power)", ""))
+    df_val = fmt_val(computed.get("df", ""))
+
+    result_val = fmt_val(result["value"])
+
+    latex = rf"""\begin{{table}}[ht]
+\centering
+\caption{{Power Analysis Results: {design_name} (Model {design_model}) --- {calc_type}}}
+\label{{tab:power-analysis-{design_name.lower()}}}
+\begin{{tabular}}{{llll}}
+\hline
+\textbf{{Section}} & \textbf{{Symbol}} & \textbf{{Description}} & \textbf{{Value}} \\
+\hline
+\multicolumn{{4}}{{l}}{{\textit{{Input Parameters}}}} \\
+{param_block}
+\hline
+\multicolumn{{4}}{{l}}{{\textit{{Computed Values}}}} \\
+        & $M$ & Multiplier ($T_1 + T_2$) & {m_val} \\
+        & $T_1$ & Critical value (precision) & {t1_val} \\
+        & $T_2$ & Non-centrality value (power) & {t2_val} \\
+        & $\nu$ & Degrees of freedom & {df_val} \\
+\hline
+\multicolumn{{4}}{{l}}{{\textit{{Result}}}} \\
+        & ${result_sym}$ & {result_full} & \textbf{{{result_val}}} \\
+\hline
+\end{{tabular}}
+\vspace{{4pt}}
+\begin{{minipage}}{{\linewidth}}
+\small\textit{{Note.}} Results computed using PyPowerUp! \citep{{dong2013powerup}}.
+The design effect multiplier $M = T_1 + T_2$ where $T_1 = t_{{1-\alpha/k,\,\nu}}$
+and $T_2 = t_{{1-\beta,\,\nu}}$ under a {("two" if params.get("two_tailed", 2) == 2 else "one")}-tailed
+$t$-distribution with $\nu$ degrees of freedom.
+\end{{minipage}}
+\end{{table}}"""
+    return latex
+
+
+def generate_academic_paragraph(export_data):
+    """Generate a copy-paste academic paragraph describing the power analysis."""
+    meta = export_data["metadata"]
+    result = export_data["result"]
+    params = export_data["parameters"]
+    computed = export_data["computed_values"]
+
+    design_name = meta["design_name"]
+    design_model = meta["design_model"]
+    calc_type = meta["calculation_type"]
+
+    alpha = params.get("alpha", 0.05)
+    two_tailed = params.get("two_tailed", 2)
+    power_val = params.get("power", 0.80)
+    p = params.get("p", 0.50)
+    g = params.get("g", 0)
+    n = params.get("n")
+    J = params.get("J")
+    K = params.get("K")
+    L = params.get("L")
+    es = params.get("es")
+    df = computed.get("df", "")
+    result_val = result["value"]
+    result_type = result["type"]
+
+    tail_word = "two-tailed" if two_tailed == 2 else "one-tailed"
+    alpha_str = f"\u03b1 = {alpha}"
+    power_str = f"1\u2212\u03b2 = {power_val:.2f}"
+
+    # Design-specific ICC / omega sentences
+    icc_parts = []
+    for lev, rho_key in [("Level 2", "rho2"), ("Level 3", "rho3"), ("Level 4", "rho4")]:
+        v = params.get(rho_key)
+        if v is not None:
+            icc_parts.append(f"an intraclass correlation of \u03c1 = {v:.2f} at {lev}")
+    for lev, om_key in [("Level 2", "omega2"), ("Level 3", "omega3"), ("Level 4", "omega4")]:
+        v = params.get(om_key)
+        if v is not None:
+            icc_parts.append(
+                f"treatment effect heterogeneity of \u03c9 = {v:.2f} at {lev}"
+            )
+
+    # R² sentence
+    r2_parts = []
+    for lab, key in [
+        ("Level 1", "r21"), ("Level 2", "r22"), ("Level 3", "r23"), ("Level 4", "r24")
+    ]:
+        v = params.get(key)
+        if v is not None and v > 0:
+            r2_parts.append(f"R\u00b2 = {v:.2f} at {lab}")
+
+    # Sample size sentence
+    ss_parts = []
+    if n is not None:
+        ss_parts.append(f"n = {n} participants per cluster")
+    if J is not None:
+        ss_parts.append(f"J = {J} Level-2 units")
+    if K is not None:
+        ss_parts.append(f"K = {K} Level-3 units")
+    if L is not None:
+        ss_parts.append(f"L = {L} Level-4 units")
+
+    # Result phrase
+    if "MDES" in result_type or "Effect" in result_type:
+        result_phrase = (
+            f"the minimum detectable effect size was \u03b4 = {result_val:.4f} "
+            f"(expressed as a standardized mean difference)"
+        )
+    elif "Sample" in result_type or "Size" in result_type:
+        result_phrase = (
+            f"the minimum required sample size was {int(round(result_val))} "
+            f"{result_type.split('(')[0].strip().lower()} units"
+        )
+    else:
+        result_phrase = f"the estimated statistical power was 1\u2212\u03b2 = {result_val:.4f}"
+
+    # Assemble sentences
+    sentences = []
+
+    sentences.append(
+        f"An a priori power analysis was conducted for a "
+        f"{DESIGNS[meta['design_name'].lower()]['full_name'] if meta['design_name'].lower() in DESIGNS else design_name} "
+        f"(Model {design_model}) to determine the {calc_type.lower()} "
+        f"(Dong & Maynard, 2013; Godfrey, in press)."
+    )
+
+    test_sentence = (
+        f"Assuming a {tail_word} test with {alpha_str} and {power_str}"
+    )
+    test_sentence += f", with {int(p * 100)}% of participants assigned to the treatment condition"
+    if g > 0:
+        test_sentence += f" and {g} covariate{'s' if g != 1 else ''} included in the model"
+    test_sentence += "."
+    sentences.append(test_sentence)
+
+    if icc_parts:
+        sentences.append(
+            "The multilevel structure of the data was characterized by "
+            + ", and ".join(icc_parts) + "."
+        )
+
+    if r2_parts:
+        sentences.append(
+            "Covariate variance explained was assumed to be " + ", ".join(r2_parts) + "."
+        )
+
+    if es is not None and "MDES" not in result_type and "Effect" not in result_type:
+        sentences.append(
+            f"The target minimum relevant effect size was set to \u03b4 = {es:.3f}."
+        )
+
+    if ss_parts:
+        sentences.append(
+            "The assumed sample allocation was " + ", ".join(ss_parts) + "."
+        )
+
+    sentences.append(
+        f"Under these conditions, {result_phrase}. "
+        f"The analysis used a {tail_word} $t$-distribution with \u03bd = {df} degrees of freedom, "
+        f"yielding a multiplier of M = {computed.get('M (Multiplier)', ''):.2f} "
+        f"(T\u2081 = {computed.get('T1 (Precision)', ''):.2f}, "
+        f"T\u2082 = {computed.get('T2 (Power)', ''):.2f})."
+    )
+
+    return " ".join(sentences)
+
+
 def render_download_buttons(export_data, key_suffix=""):
-    """Render download buttons for CSV, JSON, and Excel."""
+    """Render download buttons for CSV, JSON, Excel, and LaTeX."""
     st.markdown("---")
     st.markdown("**📥 Download Results**")
-    
-    col1, col2, col3 = st.columns(3)
-    
+
+    col1, col2, col3, col4 = st.columns(4)
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     design_name = export_data["metadata"]["design_name"]
-    
+
     with col1:
         csv_data = export_to_csv(export_data)
         st.download_button(
@@ -734,7 +1019,7 @@ def render_download_buttons(export_data, key_suffix=""):
             key=f"download_csv_{key_suffix}",
             use_container_width=True
         )
-    
+
     with col2:
         json_data = export_to_json(export_data)
         st.download_button(
@@ -745,7 +1030,7 @@ def render_download_buttons(export_data, key_suffix=""):
             key=f"download_json_{key_suffix}",
             use_container_width=True
         )
-    
+
     with col3:
         try:
             excel_data = export_to_excel(export_data)
@@ -758,7 +1043,43 @@ def render_download_buttons(export_data, key_suffix=""):
                 use_container_width=True
             )
         except Exception:
-            st.button("📊 Excel (requires openpyxl)", disabled=True, key=f"download_excel_disabled_{key_suffix}", use_container_width=True)
+            st.button(
+                "📊 Excel (requires openpyxl)",
+                disabled=True,
+                key=f"download_excel_disabled_{key_suffix}",
+                use_container_width=True,
+            )
+
+    with col4:
+        latex_data = export_to_latex(export_data)
+        st.download_button(
+            label="📝 LaTeX",
+            data=latex_data,
+            file_name=f"powerup_{design_name}_{timestamp}.tex",
+            mime="text/plain",
+            key=f"download_latex_{key_suffix}",
+            use_container_width=True,
+        )
+
+    # Academic paragraph
+    st.markdown("---")
+    st.markdown("**📖 Academic Write-Up**")
+    st.caption(
+        "Copy and paste this paragraph into your manuscript. "
+        "Adjust sample description and covariates as appropriate for your study."
+    )
+    try:
+        para = generate_academic_paragraph(export_data)
+        st.text_area(
+            label="Academic paragraph",
+            value=para,
+            height=200,
+            label_visibility="collapsed",
+            key=f"academic_para_{key_suffix}",
+        )
+    except Exception:
+        st.info("Academic paragraph could not be generated for this design configuration.")
+
 
 
 def main():
@@ -1030,7 +1351,7 @@ def main():
                 <div class="result-box">
                     <div class="result-label">{result_label}</div>
                     <div class="result-value">{result_value:.4f}</div>
-                    <div style="color:#666; font-size:0.9rem;">{result_desc}</div>
+                    <div style="color:#444444; font-size:0.9rem;">{result_desc}</div>
                 </div>
                 """, unsafe_allow_html=True)
                 
@@ -1040,7 +1361,7 @@ def main():
                     <div class="result-box" style="background-color: #fdf2e9; border-color: #e67e22;">
                         <div class="result-label" style="color: #d35400;">MDES (with comparison units)</div>
                         <div class="result-value" style="color: #873600;">{result_w_compare_value:.4f}</div>
-                        <div style="color:#666; font-size:0.9rem;">Using q={params_collected.get('q', 2)} comparison units per treatment</div>
+                        <div style="color:#444444; font-size:0.9rem;">Using q={params_collected.get('q', 2)} comparison units per treatment</div>
                     </div>
                     """, unsafe_allow_html=True)
                 
